@@ -1,0 +1,54 @@
+id: template_standard_flow
+name: Template Standard Flow
+inputs:
+  query:
+    type: string
+    is_chat_input: false
+  web_links:
+    type: list
+    is_chat_input: false
+outputs:
+  result:
+    type: string
+    reference: ${generate_response.output}
+nodes:
+- name: retreive_context
+  type: python
+  source:
+    type: code
+    path: index_url_content.py
+  inputs:
+    openai_conn: OpenAIEmbeddingConnection
+    query: ${inputs.query}
+    urls: ${inputs.web_links}
+  use_variants: false
+- name: building_prompt
+  type: prompt
+  source:
+    type: code
+    path: building_prompt.jinja2
+  inputs:
+    context: ${retreive_context.output}
+    query: ${inputs.query}
+  use_variants: false
+- name: generate_response
+  type: llm
+  source:
+    type: code
+    path: generate_response.jinja2
+  inputs:
+    deployment_name: llmops_CT_GPT4o
+    temperature: 1
+    top_p: 1
+    max_tokens: 2000
+    response_format:
+      type: text
+    full_query: ${building_prompt.output}
+  provider: AzureOpenAI
+  connection: llmopsclassroomopenai
+  api: chat
+  module: promptflow.tools.aoai
+  use_variants: false
+node_variants: {}
+environment:
+  python_requirements_txt: requirements.txt
