@@ -1,0 +1,10 @@
+# To ensure app dependencies are ported from your virtual environment/host machine into your container, run 'pip freeze > requirements.txt' in the terminal to overwrite this file
+chainlit
+langchain-community
+langchain-text-splitters
+# langchain-chroma
+langchain-core
+langchain
+arize-phoenix
+# langchain-huggingface
+# faiss-cpu
