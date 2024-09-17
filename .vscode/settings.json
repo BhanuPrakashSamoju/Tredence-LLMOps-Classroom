@@ -1,7 +1,9 @@
 {
     "cSpell.words": [
         "chainlit",
+        "dataframe",
         "Instrumentor",
+        "OPENAI",
         "otel"
     ]
 }
