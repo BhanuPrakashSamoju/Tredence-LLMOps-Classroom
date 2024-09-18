@@ -8,6 +8,8 @@ This repo houses code for the training sessions &amp; assignments for the LLMOps
 
 ### Assignment 3:
     Build a Chainlit Chatbot with history aware retriever & QA RAG Chain.
+  
+   [Chainlit App Readme](/assignments/assignment_03/rag_chatbot/docs/readme.md)
 
 ### Folder Structure:
 ```
