@@ -8,5 +8,5 @@ langchain
 arize-phoenix
 langchain-huggingface
 # faiss-cpu
-unstructured-client
-langchain-unstructured
+# unstructured-client
+# langchain-unstructured
