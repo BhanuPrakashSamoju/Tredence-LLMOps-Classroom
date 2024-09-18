@@ -20,6 +20,7 @@ This repo houses code for the training sessions &amp; assignments for the LLMOps
 │   │       │
 │   │       └───url-search-bhanu
 │   │           │   building_prompt.jinja2
+│   │           │   building_prompt__variant_1.jinja2
 │   │           │   building_prompt__variant_2.jinja2
 │   │           │   echo.py
 │   │           │   embedding_model_test.jinja2
@@ -27,8 +28,13 @@ This repo houses code for the training sessions &amp; assignments for the LLMOps
 │   │           │   flow.meta.yaml
 │   │           │   generate_response.jinja2
 │   │           │   get_embedding_test.jinja2
+│   │           │   index_url_content.jinja2
 │   │           │   joke.jinja2
-│   │           │   Unconfirmed 640741.crdownload
+│   │           │   requirements.txt
+│   │           │   samples.json
+│   │           │   set_openai_connection.py
+│   │           │   test.py
+│   │           │   
 │   │           │
 │   │           └───__pychace__
 │   │                   echo.cpython-39.pyc
