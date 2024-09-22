@@ -3,3 +3,5 @@
 .files
 .env
 chroma_langchain_db
+assignments/assignment_03/rag_chatbot/__pycache__/*
+*.pyc

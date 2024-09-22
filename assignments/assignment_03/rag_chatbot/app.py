@@ -1,11 +1,14 @@
 import chainlit as cl
 import pandas as pd
 import os
+import json
 import validators
 import phoenix as px
 from phoenix.trace.langchain import LangChainInstrumentor
 from phoenix.otel import register
+import plotly.graph_objects as go
 
+from chainlit.input_widget import Switch
 import bs4
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -24,6 +27,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
 from langchain.schema.runnable.config import RunnableConfig
 from langchain.callbacks.base import BaseCallbackHandler
+from phoenix.evals import HallucinationEvaluator, OpenAIModel, QAEvaluator, run_evals
 
 
 def process_url_content(url):
@@ -65,9 +69,15 @@ async def validate_url(url):
     else:
         return True
     
-    
-async def set_up_llm_chain():
-    
+
+@cl.on_settings_update
+async def enable_evaluation(settings):
+    cl.user_session.set(
+        "hallucination_evaluation", settings["EvaluateHallucination"]
+    )
+    cl.user_session.set(
+        "qa_evaluation", settings["EvaluateQA"]
+    )
 
 
 @cl.on_chat_start
@@ -120,17 +130,21 @@ async def on_chat_start():
 
     # Wait for the user to upload a file
     while urls is None:
-        resp = await cl.AskUserMessage(
-            content="Please send me a url of the blog you want to chat with.",
-            timeout=180,
-        ).send()
+        try:
+            resp = await cl.AskUserMessage(
+                content="Please send me a url of the blog you want to chat with.",
+                timeout=180,
+            ).send()
 
-        print(resp)
+            print(resp)
 
-        if not await validate_url(resp["output"]):
-            continue
-        else:
-            urls = [resp["output"]]
+            if not await validate_url(resp["output"]):
+                continue
+            else:
+                urls = [resp["output"]]
+
+        except Exception as e:
+            print(f"Catching URL failed with error: {e}")
 
     print(urls)
 
@@ -156,6 +170,19 @@ async def on_chat_start():
         documents=splits,
     )
     print("Initialized Vectorstore")
+     
+    settings = await cl.ChatSettings(
+        [
+            Switch(
+                id="EvaluateHallucination",
+                label="Evaluate Hallucination",
+                initial=True
+            ),
+            Switch(id="EvaluateQA", label="Evaluate QA RAG", initial=True)
+        ]
+    ).send()
+
+    await enable_evaluation(settings)
 
     # Contextualize question #
     contextualize_q_system_prompt = (
@@ -231,16 +258,23 @@ async def on_chat_start():
     cl.user_session.set("chain", conversational_rag_chain)
 
 
-def process_chunks(chunk: dict):
+def process_results(chunk: dict):
+
+    def __process_doc(doc: Document):
+        processed = {}
+        processed["metadata"] = doc.metadata
+        processed["page_content"] = doc.page_content
+        return processed
     
     for k, v in chunk.items():
         if isinstance(v, Document):
-            processed = {}
-            processed["metadata"] = v.metadata
-            processed["page_content"] = v.page_content
-            chunk[k] = processed
-        elif isinstance(v, list) or isinstance(v, dict) or isinstance(v, str):
-            pass
+            chunk[k] = __process_doc(v)
+        elif isinstance(v, list):
+            chunk[k] = [__process_doc(doc) if isinstance(doc, Document) else doc for doc in v]
+        elif isinstance(v, dict):
+            chunk[k] = {k: __process_doc(doc) if isinstance(doc, Document) else doc for k, doc in v.items()}
+        elif isinstance(v, str):
+            chunk[k] = v
         else:
             chunk[k] = "Unexpected output."
 
@@ -258,6 +292,9 @@ async def main(message: cl.Message):
     # res = await chain.acall(message.content, callbacks=[cb])
     # answer = res["answer"]
 
+    hallucination_flag = cl.user_session.get("hallucination_evaluation")
+    qa_eval_flag = cl.user_session.get("qa_evaluation")
+
     print(f"User Session: {cl.user_session.get("id")}")
 
     result = await runnable.ainvoke(
@@ -273,7 +310,97 @@ async def main(message: cl.Message):
     #     content=f"Context: {result["context"]}",
     # )
 
+    print(f"Result is: {result}")
+
     await msg.send()
+
+    AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
+
+    eval_model = OpenAIModel(
+        model=os.environ.get(
+            "AZURE_OPENAI_MODEL_NAME"
+        ),
+        azure_endpoint=os.environ.get(
+            "AZURE_OPENAI_ENDPOINT"
+        ),
+        api_version=os.environ.get(
+            "AZURE_OPENAI_VERSION"
+        ),
+    )
+
+    if hallucination_flag or qa_eval_flag:
+        processed_result = process_results(result)
+        print(f"Processed Result: {processed_result}")
+        # Define your evaluators
+        hallucination_evaluator = HallucinationEvaluator(eval_model)
+        qa_evaluator = QAEvaluator(eval_model)
+        df = pd.DataFrame([
+            {
+                "reference": processed_result["context"],
+                "context": processed_result["context"],
+                "input": processed_result["input"],
+                "output": processed_result["answer"]
+            }
+        ])
+        assert all(column in df.columns for column in ["output", "input", "context", "reference"])
+        # Run the evaluators, each evaluator will return a dataframe with evaluation results
+        # We upload the evaluation results to Phoenix in the next step
+        results_df = df.copy()
+        results_df["reference"] = results_df["reference"].apply(
+            lambda x: json.dumps(x)
+        )
+        results_df["context"] = results_df["context"].apply(
+            lambda x: json.dumps(x)
+        )
+        if hallucination_flag:
+            hallucination_eval_df = run_evals(
+                dataframe=df,
+                evaluators=[hallucination_evaluator],
+                provide_explanation=True
+            )
+            # h_index = [hallucination_eval_df.index(i) for i in hallucination_eval_df[0]]
+            hdf = hallucination_eval_df[0]
+            print("Indexes here:")
+            print(hdf)
+            print("_________________________________________________________")
+            print(hallucination_eval_df)
+            results_df["hallucination_eval"] = hdf["label"]
+            results_df["hallucination_score"] = hdf["score"]
+            results_df["hallucination_explanation"] = hdf["explanation"]
+        if qa_eval_flag:
+            qa_eval_df = run_evals(
+                dataframe=df,
+                evaluators=[qa_evaluator],
+                provide_explanation=True
+            )
+            # qa_index = [qa_eval_df.index(i) for i in qa_eval_df[0]]
+            qa_df = qa_eval_df[0]
+            print("Indexes here:")
+            print(qa_df)
+            print("_________________________________________________________")
+            print(qa_eval_df)
+            results_df["qa_eval"] = qa_df["label"]
+            results_df["qa_score"] = qa_df["score"]
+            results_df["qa_explanation"] = qa_df["explanation"]
+
+        print(f"Results: {results_df}")
+        # Create a Plotly table
+        fig = go.Figure(data=[go.Table(
+            header=dict(values=list(results_df.columns),
+                        fill_color='paleturquoise',
+                        align='left'),
+            cells=dict(
+                values=[results_df[col] for col in results_df.columns],
+                fill_color='lavender',
+                align='left')
+            )
+        ])
+        fig.update_layout(width=1500, height=800)
+
+        elements = [cl.Plotly(name="table", figure=fig, display="inline")]
+
+        await cl.Message(content="Evaluation Results: ", elements=elements).send()
+
     # await context_msg.send()
     
 @cl.on_chat_end
@@ -293,8 +420,5 @@ async def on_chat_end():
         print(f"Directories already exist: {directory}")
 
     df.to_csv(persist_path, sep=",", header=True, mode="a")
-    # px_session.stop()
-
-    # cl.user_session.clear()
 
 
