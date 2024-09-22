@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demoapp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demoapp
+  template:
+    metadata:
+      labels:
+        app: demoapp
+    spec:
+      containers:
+      - name: demoapp
+        image: nginx:latest
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 3000
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo 'server { listen 3000; location / { return 200 "Hello from NGINX!"; } }' > /etc/nginx/conf.d/default.conf;
+            nginx -g 'daemon off;'
